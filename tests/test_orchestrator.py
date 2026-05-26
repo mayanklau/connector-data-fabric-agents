@@ -1,10 +1,8 @@
-from agentic_soc.main import AlertEvent, EntityRef, EntityType, Severity, get_audit, get_fabric, get_orchestrator, get_store
+from agentic_soc.main import AlertEvent, EntityRef, EntityType, Severity, get_orchestrator, get_store, reset_state_for_tests
 
 
 def setup_function() -> None:
-    get_fabric.cache_clear()
-    get_store.cache_clear()
-    get_audit.cache_clear()
+    reset_state_for_tests()
 
 
 def test_high_risk_identity_alert_creates_case_and_approval() -> None:
@@ -23,7 +21,7 @@ def test_high_risk_identity_alert_creates_case_and_approval() -> None:
     assert result.case.evidence
     assert result.approvals
     assert any(decision.agent_type.value == "triage" for decision in result.decisions)
-    assert {writeback.target for writeback in get_store().writebacks.values()} == {"siem", "soar"}
+    assert {writeback.target for writeback in get_store().list_writebacks()} == {"siem", "soar"}
 
 
 def test_low_context_event_stays_low_or_medium_without_response_approval() -> None:
