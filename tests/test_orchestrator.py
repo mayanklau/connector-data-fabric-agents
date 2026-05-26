@@ -23,6 +23,7 @@ def test_high_risk_identity_alert_creates_case_and_approval() -> None:
     assert result.case.evidence
     assert result.approvals
     assert any(decision.agent_type.value == "triage" for decision in result.decisions)
+    assert {writeback.target for writeback in get_store().writebacks.values()} == {"siem", "soar"}
 
 
 def test_low_context_event_stays_low_or_medium_without_response_approval() -> None:
