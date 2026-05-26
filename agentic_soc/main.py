@@ -177,6 +177,40 @@ class Feedback(BaseModel):
     created_at: datetime = Field(default_factory=now_utc)
 
 
+class ApprovalDecision(BaseModel):
+    approved: bool
+    decided_by: str
+    notes: str = ""
+
+
+class IntegrationWriteback(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("wb"))
+    target: str
+    case_id: str
+    payload: dict[str, Any]
+    status: str = "queued"
+    created_at: datetime = Field(default_factory=now_utc)
+
+
+class ConnectorStatus(BaseModel):
+    name: str
+    type: str
+    mode: str
+    status: str
+    capabilities: list[str] = Field(default_factory=list)
+
+
+class MetricsSnapshot(BaseModel):
+    events_received: int
+    cases_created: int
+    approvals_pending: int
+    approvals_approved: int
+    approvals_rejected: int
+    writebacks_queued: int
+    audit_records: int
+    feedback_items: int
+
+
 class ContextBundle(BaseModel):
     entity: EntityRef
     risk_score: int = Field(ge=0, le=100)
@@ -259,6 +293,7 @@ class CaseStore:
         self.cases: dict[str, Case] = {}
         self.approvals: dict[str, Approval] = {}
         self.feedback: dict[str, Feedback] = {}
+        self.writebacks: dict[str, IntegrationWriteback] = {}
 
     def save_case(self, case: Case) -> Case:
         self.cases[case.id] = case
@@ -270,6 +305,25 @@ class CaseStore:
     def save_approval(self, approval: Approval) -> Approval:
         self.approvals[approval.id] = approval
         return approval
+
+    def decide_approval(self, approval_id: str, decision: ApprovalDecision) -> Approval | None:
+        approval = self.approvals.get(approval_id)
+        if not approval:
+            return None
+        status = "approved" if decision.approved else "rejected"
+        updated = approval.model_copy(
+            update={
+                "status": status,
+                "decided_at": now_utc(),
+                "decided_by": decision.decided_by,
+            }
+        )
+        self.approvals[approval_id] = updated
+        return updated
+
+    def save_writeback(self, writeback: IntegrationWriteback) -> IntegrationWriteback:
+        self.writebacks[writeback.id] = writeback
+        return writeback
 
 
 class AuditLog:
@@ -288,12 +342,84 @@ class PolicyEngine:
         return [action.model_copy(update={"requires_approval": int(action.risk_level) >= self.settings.require_human_approval_level}) for action in actions]
 
 
+class IntegrationHub:
+    def __init__(self, store: CaseStore, audit: AuditLog) -> None:
+        self.store = store
+        self.audit = audit
+
+    def connectors(self) -> list[ConnectorStatus]:
+        return [
+            ConnectorStatus(
+                name="security_data_fabric",
+                type="data_fabric",
+                mode="in_memory_reference",
+                status="healthy",
+                capabilities=["entity_context", "timeline", "threat_intel", "related_alerts"],
+            ),
+            ConnectorStatus(
+                name="siem",
+                type="siem",
+                mode="writeback_stub",
+                status="ready",
+                capabilities=["alert_enrichment", "case_notes", "severity_update"],
+            ),
+            ConnectorStatus(
+                name="soar",
+                type="soar",
+                mode="approval_stub",
+                status="ready",
+                capabilities=["playbook_package", "approved_action_dispatch"],
+            ),
+        ]
+
+    def queue_siem_writeback(self, case: Case) -> IntegrationWriteback:
+        payload = {
+            "source_event_id": case.source_event_id,
+            "case_id": case.id,
+            "severity": case.severity.value,
+            "status": case.status.value,
+            "summary": case.decisions[0].summary if case.decisions else case.title,
+            "evidence_count": len(case.evidence),
+        }
+        writeback = self.store.save_writeback(
+            IntegrationWriteback(target="siem", case_id=case.id, payload=payload)
+        )
+        self.audit.record("integration_hub", "siem_writeback_queued", writeback.id, case_id=case.id)
+        return writeback
+
+    def queue_soar_package(self, case: Case) -> IntegrationWriteback:
+        actions = [
+            action.model_dump(mode="json")
+            for decision in case.decisions
+            for action in decision.recommended_actions
+        ]
+        payload = {
+            "case_id": case.id,
+            "entities": [entity.model_dump(mode="json") for entity in case.entities],
+            "evidence": [evidence.model_dump(mode="json") for evidence in case.evidence],
+            "recommended_actions": actions,
+        }
+        writeback = self.store.save_writeback(
+            IntegrationWriteback(target="soar", case_id=case.id, payload=payload)
+        )
+        self.audit.record("integration_hub", "soar_package_queued", writeback.id, case_id=case.id)
+        return writeback
+
+
 class AgenticSOCOrchestrator:
-    def __init__(self, fabric: InMemorySecurityDataFabric, store: CaseStore, audit: AuditLog, policy: PolicyEngine) -> None:
+    def __init__(
+        self,
+        fabric: InMemorySecurityDataFabric,
+        store: CaseStore,
+        audit: AuditLog,
+        policy: PolicyEngine,
+        integrations: IntegrationHub,
+    ) -> None:
         self.fabric = fabric
         self.store = store
         self.audit = audit
         self.policy = policy
+        self.integrations = integrations
 
     def handle_event(self, event: AlertEvent) -> OrchestrationResult:
         self.fabric.save_event(event)
@@ -306,6 +432,9 @@ class AgenticSOCOrchestrator:
         highest = max(decisions, key=lambda d: {"low": 1, "medium": 2, "high": 3, "critical": 4}[d.severity.value])
         case = self.store.save_case(Case(title=f"{event.name} - agentic triage", status=CaseStatus.awaiting_approval if any(a.requires_approval for d in decisions for a in d.recommended_actions) else CaseStatus.in_triage, source_event_id=event.id, severity=highest.severity, entities=event.entities, decisions=decisions, evidence=evidence, updated_at=now_utc()))
         approvals = [self.store.save_approval(Approval(case_id=case.id, action=action)) for decision in decisions for action in decision.recommended_actions if action.requires_approval]
+        self.integrations.queue_siem_writeback(case)
+        if approvals:
+            self.integrations.queue_soar_package(case)
         self.audit.record("orchestrator", "workflow_completed", case.id, event_id=event.id, approvals=[a.id for a in approvals])
         return OrchestrationResult(event=event, case=case, decisions=decisions, approvals=approvals)
 
@@ -371,8 +500,18 @@ def get_audit() -> AuditLog:
     return AuditLog()
 
 
+def get_integrations() -> IntegrationHub:
+    return IntegrationHub(get_store(), get_audit())
+
+
 def get_orchestrator() -> AgenticSOCOrchestrator:
-    return AgenticSOCOrchestrator(get_fabric(), get_store(), get_audit(), PolicyEngine(get_settings()))
+    return AgenticSOCOrchestrator(
+        get_fabric(),
+        get_store(),
+        get_audit(),
+        PolicyEngine(get_settings()),
+        get_integrations(),
+    )
 
 
 app = FastAPI(title="Agentic SOC Data Fabric Orchestrator", version="0.1.0")
@@ -416,12 +555,62 @@ def list_approvals(store: CaseStore = Depends(get_store)) -> list[Approval]:
     return list(store.approvals.values())
 
 
+@app.post("/approvals/{approval_id}/decision", response_model=Approval)
+def decide_approval(
+    approval_id: str,
+    decision: ApprovalDecision,
+    store: CaseStore = Depends(get_store),
+    audit: AuditLog = Depends(get_audit),
+) -> Approval:
+    approval = store.decide_approval(approval_id, decision)
+    if not approval:
+        raise HTTPException(status_code=404, detail="approval not found")
+    audit.record(
+        decision.decided_by,
+        "approval_decided",
+        approval_id,
+        status=approval.status,
+        notes=decision.notes,
+    )
+    return approval
+
+
 @app.post("/feedback", response_model=Feedback)
-def create_feedback(feedback: Feedback, store: CaseStore = Depends(get_store)) -> Feedback:
+def create_feedback(
+    feedback: Feedback,
+    store: CaseStore = Depends(get_store),
+    audit: AuditLog = Depends(get_audit),
+) -> Feedback:
     store.feedback[feedback.id] = feedback
+    audit.record(feedback.submitted_by, "feedback_created", feedback.id, case_id=feedback.case_id)
     return feedback
 
 
 @app.get("/audit", response_model=list[AuditRecord])
 def list_audit(audit: AuditLog = Depends(get_audit)) -> list[AuditRecord]:
     return audit.records
+
+
+@app.get("/connectors", response_model=list[ConnectorStatus])
+def list_connectors(integrations: IntegrationHub = Depends(get_integrations)) -> list[ConnectorStatus]:
+    return integrations.connectors()
+
+
+@app.get("/writebacks", response_model=list[IntegrationWriteback])
+def list_writebacks(store: CaseStore = Depends(get_store)) -> list[IntegrationWriteback]:
+    return list(store.writebacks.values())
+
+
+@app.get("/metrics", response_model=MetricsSnapshot)
+def metrics(store: CaseStore = Depends(get_store), audit: AuditLog = Depends(get_audit)) -> MetricsSnapshot:
+    approvals = list(store.approvals.values())
+    return MetricsSnapshot(
+        events_received=len(get_fabric().events),
+        cases_created=len(store.cases),
+        approvals_pending=sum(1 for approval in approvals if approval.status == "pending"),
+        approvals_approved=sum(1 for approval in approvals if approval.status == "approved"),
+        approvals_rejected=sum(1 for approval in approvals if approval.status == "rejected"),
+        writebacks_queued=len(store.writebacks),
+        audit_records=len(audit.records),
+        feedback_items=len(store.feedback),
+    )
