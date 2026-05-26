@@ -1,10 +1,6 @@
 # Agentic SOC Data Fabric Orchestrator
 
-Reference implementation for an Agentic SOC orchestration layer that lets agents work directly against a governed Security Data Fabric. SIEM is still supported, but it is a source and writeback target instead of the mandatory orchestration layer.
-
-## Status
-
-This repository contains a coded MVP/reference build plus production PRD. It is not a drop-in enterprise deployment yet because real SIEM, SOAR, EDR, IAM, cloud, ticketing, identity, and data fabric credentials are environment-specific. The code provides the contracts, workflows, guardrails, endpoints, seeded data, and integration stubs needed to replace the in-memory adapters with production connectors.
+Reference implementation for an Agentic SOC orchestration layer that lets agents work directly against a governed Security Data Fabric. SIEM remains supported as a signal source and writeback target, but it is no longer the mandatory orchestration layer.
 
 ## Target Flow
 
@@ -19,51 +15,47 @@ Security Data Fabric
 Security Context API
         |
         v
-Agentic SOC Orchestrator
-        |
-        +--> Triage Agent
-        +--> Investigation Agent
-        +--> Threat Intel Agent
-        +--> Correlation Agent
-        +--> Response Recommendation Agent
-        |
+Durable Event Bus -> Agentic SOC Orchestrator
+        |              |
+        |              +--> Triage Agent
+        |              +--> Investigation Agent
+        |              +--> Threat Intel Agent
+        |              +--> Correlation Agent
+        |              +--> Response Recommendation Agent
         v
 Cases | Evidence | Approvals | SIEM Writeback | SOAR Package | Audit | Metrics
 ```
 
 ## What Is Coded
 
-- FastAPI service with OpenAPI docs.
+- Durable SQLite persistence for events, cases, approvals, feedback, audit records, writebacks, workflow runs, prompt templates, and telemetry spans.
+- API-key authentication and authorization on every route.
+- Per-agent data access scopes enforced by the policy engine.
+- Field-level masking for sensitive user and identity context.
 - Security Data Fabric reference adapter.
+- EDR, IAM, cloud, CMDB, vulnerability, and threat intelligence adapter boundaries.
 - Security Context API for entity context and timeline retrieval.
-- Event ingestion and workflow orchestration.
-- Triage Agent for disposition, severity, confidence, evidence, and recommendations.
-- Investigation Agent for timelines and similar case context.
-- Threat Intelligence Agent for indicator reputation.
-- Correlation Agent for related alert patterns.
-- Response Recommendation Agent for SOAR-ready actions.
-- Policy engine for action risk and approval requirements.
-- Case, evidence, approval, feedback, writeback, audit, and metrics models.
-- SIEM writeback queue stub.
-- SOAR investigation package queue stub.
-- Connector status endpoint.
-- Approval decision endpoint.
-- Metrics endpoint.
+- Durable event bus with idempotency keys, async background processing, retry state, dead-letter status, and workflow resume.
+- Triage, Investigation, Threat Intelligence, Correlation, and Response Recommendation agents.
+- SIEM writeback client boundary behind a writeback queue.
+- SOAR investigation package client boundary behind a writeback queue.
+- Prompt-injection sanitization for log-derived text.
+- Model gateway and prompt registry for future LLM-backed agents.
+- OpenTelemetry instrumentation, local telemetry spans, and structured JSON request/audit logs.
+- Dashboard endpoint for MTTA, false positive rate, analyst override rate, and escalation accuracy.
 - Docker and docker-compose support.
 - Unit tests.
 - Production PRD and architecture docs.
 
-## What Must Be Replaced For Production
+## Local API Keys
 
-| Reference Piece | Production Replacement |
-| --- | --- |
-| `InMemorySecurityDataFabric` | Enterprise data fabric, lakehouse, search, or graph API |
-| Seeded entity context | Live IAM, EDR, cloud, network, CMDB, vuln, TI, and case data |
-| SIEM writeback stub | Splunk, Sentinel, QRadar, Chronicle, Elastic, or internal SIEM API |
-| SOAR package stub | Cortex XSOAR, Splunk SOAR, Tines, Torq, ServiceNow SecOps, or internal SOAR |
-| In-memory `CaseStore` | Durable DB or enterprise case platform |
-| In-memory `AuditLog` | Immutable audit store and SIEM audit sink |
-| Simple policy threshold | RBAC/ABAC policy service with per-action approval rules |
+```text
+admin:   dev-admin-key
+analyst: dev-analyst-key
+agent:   dev-agent-key
+```
+
+Every route requires `X-API-Key`. User and identity context is masked unless the caller has `sensitive:read`.
 
 ## Quick Start
 
@@ -98,9 +90,12 @@ docker compose up --build
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/health` | Health check |
-| `POST` | `/events` | Ingest event and run agent workflow |
-| `POST` | `/context/entity` | Get governed entity context |
+| `GET` | `/health` | Authenticated health check |
+| `POST` | `/events` | Enqueue durable async workflow |
+| `POST` | `/events/sync` | Run workflow immediately |
+| `GET` | `/workflows` | List workflow runs |
+| `POST` | `/workflows/{workflow_id}/resume` | Resume queued, failed, or dead-lettered workflow |
+| `POST` | `/context/entity` | Get governed entity context with field masking |
 | `POST` | `/timeline` | Get entity timeline evidence |
 | `GET` | `/cases` | List generated cases |
 | `GET` | `/cases/{case_id}` | Get one case |
@@ -111,11 +106,39 @@ docker compose up --build
 | `GET` | `/connectors` | Show configured connector modes |
 | `GET` | `/writebacks` | Show queued SIEM/SOAR writebacks |
 | `GET` | `/metrics` | Show operational metrics |
+| `GET` | `/dashboard` | Show SOC dashboard metrics |
+| `GET` | `/telemetry/spans` | Show local telemetry spans |
+| `GET` | `/prompts` | List prompt templates |
+| `POST` | `/model/complete` | Invoke model gateway |
 
-## Example: Triage An Impossible Travel Alert
+## Example: Durable Async Workflow
 
 ```bash
 curl -X POST http://127.0.0.1:8000/events \
+  -H 'x-api-key: dev-admin-key' \
+  -H 'idempotency-key: alert-123' \
+  -H 'content-type: application/json' \
+  -d '{
+    "source": "siem",
+    "name": "Known Malicious IP",
+    "category": "network_ioc",
+    "severity": "high",
+    "entities": [{"type": "ip", "id": "185.199.108.153"}]
+  }'
+```
+
+Inspect or resume workflows:
+
+```bash
+curl -H 'x-api-key: dev-admin-key' http://127.0.0.1:8000/workflows
+curl -X POST -H 'x-api-key: dev-admin-key' http://127.0.0.1:8000/workflows/{workflow_id}/resume
+```
+
+## Example: Synchronous Triage
+
+```bash
+curl -X POST http://127.0.0.1:8000/events/sync \
+  -H 'x-api-key: dev-admin-key' \
   -H 'content-type: application/json' \
   -d '{
     "source": "siem",
@@ -130,19 +153,11 @@ curl -X POST http://127.0.0.1:8000/events \
   }'
 ```
 
-The response includes:
-
-- Original event.
-- Generated case.
-- Agent decisions.
-- Evidence references.
-- Recommended response actions.
-- Approval requests.
-
 ## Example: Approve A Response Action
 
 ```bash
 curl -X POST http://127.0.0.1:8000/approvals/{approval_id}/decision \
+  -H 'x-api-key: dev-admin-key' \
   -H 'content-type: application/json' \
   -d '{
     "approved": true,
@@ -151,96 +166,45 @@ curl -X POST http://127.0.0.1:8000/approvals/{approval_id}/decision \
   }'
 ```
 
-## Example: Inspect Queued Writebacks
+## Example: Masked Analyst Context
 
 ```bash
-curl http://127.0.0.1:8000/writebacks
+curl -X POST http://127.0.0.1:8000/context/entity \
+  -H 'x-api-key: dev-analyst-key' \
+  -H 'content-type: application/json' \
+  -d '{"type": "user", "id": "user:maya"}'
 ```
 
-The reference build queues:
+The analyst key can read context, but sensitive user identity and business context are masked.
 
-- SIEM enrichment writeback with case summary, severity, status, and evidence count.
-- SOAR investigation package with entities, evidence, and recommended actions.
+## Production Replacement Map
 
-## Data Model
+| Reference Piece | Production Replacement |
+| --- | --- |
+| SQLite repository | Managed PostgreSQL, cloud SQL, or enterprise case store |
+| Stub SIEM client | Splunk, Sentinel, QRadar, Chronicle, Elastic, or internal SIEM API |
+| Stub SOAR client | Cortex XSOAR, Splunk SOAR, Tines, Torq, ServiceNow SecOps, or internal SOAR |
+| Stub EDR/IAM/cloud/CMDB/vuln/TI adapters | Real enterprise connector clients |
+| API-key auth | Enterprise IdP, OAuth2, mTLS, or workload identity |
+| Simple policy threshold | RBAC/ABAC policy service with per-action approval rules |
+| Local structured logs | Central log platform and SIEM ingestion |
+| Local telemetry spans | OpenTelemetry collector and tracing backend |
 
-Core objects:
+## Workflow Behavior
 
-- `AlertEvent`
-- `EntityRef`
-- `ContextBundle`
-- `Evidence`
-- `AgentDecision`
-- `RecommendedAction`
-- `Case`
-- `Approval`
-- `Feedback`
-- `IntegrationWriteback`
-- `AuditRecord`
-- `MetricsSnapshot`
-
-## Agent Workflow
-
-When `/events` receives an alert:
-
-1. The event is saved into the data fabric adapter.
-2. The event router writes an audit record.
-3. Triage, Threat Intelligence, and Correlation agents run.
-4. High-risk or suspicious outputs trigger Investigation and Response Recommendation agents.
-5. The policy engine applies approval requirements based on action risk.
-6. A case is created with evidence and agent decisions.
-7. Approval requests are created for risky actions.
-8. SIEM writeback is queued.
-9. SOAR package is queued when approvals exist.
-10. Metrics and audit records are available through API endpoints.
-
-## Action Risk Levels
-
-| Level | Name | Default Behavior |
-| --- | --- | --- |
-| 0 | Read-only | No approval |
-| 1 | Case write | No approval |
-| 2 | Enrichment | No approval |
-| 3 | Reversible response | Approval required |
-| 4 | High-impact containment | Approval required |
-| 5 | Destructive | Approval required |
-
-Configure the approval threshold:
-
-```bash
-export REQUIRE_HUMAN_APPROVAL_LEVEL=3
-```
-
-## Repository Layout
-
-```text
-agentic_soc/
-  main.py              Runnable reference service
-docs/
-  PRD.md              Product requirements
-  ARCHITECTURE.md     Architecture and production hardening notes
-tests/
-  test_api.py
-  test_orchestrator.py
-Dockerfile
-docker-compose.yml
-pyproject.toml
-```
-
-## Production Hardening Checklist
-
-- Replace in-memory stores with durable persistence.
-- Add authentication and authorization to every route.
-- Add per-agent data access scopes.
-- Add field-level masking for sensitive data.
-- Add real SIEM and SOAR clients behind the writeback queue.
-- Add EDR, IAM, cloud, CMDB, vulnerability, and threat intel adapters.
-- Add an event bus for asynchronous workflow execution.
-- Add retry, dead-letter, idempotency, and workflow resume support.
-- Add model gateway and prompt/version registry if LLM-backed agents are introduced.
-- Add prompt-injection handling for log-derived text.
-- Add OpenTelemetry traces and structured logs.
-- Add dashboarding on MTTA, false positives, override rate, and escalation accuracy.
+1. The request is authenticated and authorized.
+2. Prompt-injection patterns in event text are sanitized.
+3. The event is durably saved into SQLite.
+4. The workflow is enqueued with an idempotency key.
+5. The event router writes an audit record.
+6. Triage, Threat Intelligence, and Correlation agents run with policy-scoped access.
+7. High-risk or suspicious outputs trigger Investigation and Response Recommendation agents.
+8. The policy engine applies approval requirements based on action risk.
+9. A case is created with evidence and agent decisions.
+10. Approval requests are created for risky actions.
+11. SIEM writeback is queued.
+12. SOAR package is queued when approvals exist.
+13. Metrics, dashboard data, audit records, and telemetry spans are available through API endpoints.
 
 ## Docs
 
