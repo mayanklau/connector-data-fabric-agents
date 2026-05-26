@@ -1,46 +1,91 @@
 # Agentic SOC Data Fabric Orchestrator
 
-Production reference build for an Agentic SOC orchestration layer that lets security agents work directly against a governed Security Data Fabric instead of depending on SIEM as the orchestration path.
+Reference implementation for an Agentic SOC orchestration layer that lets agents work directly against a governed Security Data Fabric. SIEM is still supported, but it is a source and writeback target instead of the mandatory orchestration layer.
 
-## What This Builds
+## Status
+
+This repository contains a coded MVP/reference build plus production PRD. It is not a drop-in enterprise deployment yet because real SIEM, SOAR, EDR, IAM, cloud, ticketing, identity, and data fabric credentials are environment-specific. The code provides the contracts, workflows, guardrails, endpoints, seeded data, and integration stubs needed to replace the in-memory adapters with production connectors.
+
+## Target Flow
 
 ```text
-Security Data Fabric -> Security Context API -> Agentic SOC Orchestrator
-                                             -> Triage / Investigation / TI / Response Agents
-                                             -> Cases / Evidence / SIEM Writeback / SOAR Approval
+Security Data Sources
+  SIEM | EDR/XDR | IAM | Cloud | Network | TI | CMDB | Vulnerability
+        |
+        v
+Security Data Fabric
+        |
+        v
+Security Context API
+        |
+        v
+Agentic SOC Orchestrator
+        |
+        +--> Triage Agent
+        +--> Investigation Agent
+        +--> Threat Intel Agent
+        +--> Correlation Agent
+        +--> Response Recommendation Agent
+        |
+        v
+Cases | Evidence | Approvals | SIEM Writeback | SOAR Package | Audit | Metrics
 ```
 
-The SIEM remains supported as an alert source and writeback target, but agents interact with the data fabric through governed APIs.
+## What Is Coded
 
-## Included
+- FastAPI service with OpenAPI docs.
+- Security Data Fabric reference adapter.
+- Security Context API for entity context and timeline retrieval.
+- Event ingestion and workflow orchestration.
+- Triage Agent for disposition, severity, confidence, evidence, and recommendations.
+- Investigation Agent for timelines and similar case context.
+- Threat Intelligence Agent for indicator reputation.
+- Correlation Agent for related alert patterns.
+- Response Recommendation Agent for SOAR-ready actions.
+- Policy engine for action risk and approval requirements.
+- Case, evidence, approval, feedback, writeback, audit, and metrics models.
+- SIEM writeback queue stub.
+- SOAR investigation package queue stub.
+- Connector status endpoint.
+- Approval decision endpoint.
+- Metrics endpoint.
+- Docker and docker-compose support.
+- Unit tests.
+- Production PRD and architecture docs.
 
-- Production PRD: `docs/PRD.md`
-- Architecture and operating model: `docs/ARCHITECTURE.md`
-- FastAPI service with OpenAPI docs
-- Security Context API
-- Event ingestion and routing
-- Triage, investigation, threat intel, correlation, and response recommendation agents
-- Case, evidence, approval, feedback, and audit models
-- In-memory reference data fabric for local development
-- Policy guardrails for action risk levels
-- Dockerfile and docker-compose
-- Unit tests for workflows and guardrails
+## What Must Be Replaced For Production
+
+| Reference Piece | Production Replacement |
+| --- | --- |
+| `InMemorySecurityDataFabric` | Enterprise data fabric, lakehouse, search, or graph API |
+| Seeded entity context | Live IAM, EDR, cloud, network, CMDB, vuln, TI, and case data |
+| SIEM writeback stub | Splunk, Sentinel, QRadar, Chronicle, Elastic, or internal SIEM API |
+| SOAR package stub | Cortex XSOAR, Splunk SOAR, Tines, Torq, ServiceNow SecOps, or internal SOAR |
+| In-memory `CaseStore` | Durable DB or enterprise case platform |
+| In-memory `AuditLog` | Immutable audit store and SIEM audit sink |
+| Simple policy threshold | RBAC/ABAC policy service with per-action approval rules |
 
 ## Quick Start
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -e ".[dev]"
 uvicorn agentic_soc.main:app --reload
 ```
 
-Then open `http://127.0.0.1:8000/docs`.
+Open:
 
-Run tests:
+```text
+http://127.0.0.1:8000/docs
+```
+
+Run checks:
 
 ```bash
 pytest
+ruff check .
 ```
 
 Run with Docker:
@@ -49,7 +94,25 @@ Run with Docker:
 docker compose up --build
 ```
 
-## Example
+## Main Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `POST` | `/events` | Ingest event and run agent workflow |
+| `POST` | `/context/entity` | Get governed entity context |
+| `POST` | `/timeline` | Get entity timeline evidence |
+| `GET` | `/cases` | List generated cases |
+| `GET` | `/cases/{case_id}` | Get one case |
+| `GET` | `/approvals` | List approval requests |
+| `POST` | `/approvals/{approval_id}/decision` | Approve or reject an action |
+| `POST` | `/feedback` | Submit analyst feedback |
+| `GET` | `/audit` | List audit records |
+| `GET` | `/connectors` | Show configured connector modes |
+| `GET` | `/writebacks` | Show queued SIEM/SOAR writebacks |
+| `GET` | `/metrics` | Show operational metrics |
+
+## Example: Triage An Impossible Travel Alert
 
 ```bash
 curl -X POST http://127.0.0.1:8000/events \
@@ -67,4 +130,119 @@ curl -X POST http://127.0.0.1:8000/events \
   }'
 ```
 
-The service returns the event, generated case, agent decisions, evidence, recommended actions, approval requests, and audit-ready metadata.
+The response includes:
+
+- Original event.
+- Generated case.
+- Agent decisions.
+- Evidence references.
+- Recommended response actions.
+- Approval requests.
+
+## Example: Approve A Response Action
+
+```bash
+curl -X POST http://127.0.0.1:8000/approvals/{approval_id}/decision \
+  -H 'content-type: application/json' \
+  -d '{
+    "approved": true,
+    "decided_by": "analyst-1",
+    "notes": "Evidence reviewed and action approved."
+  }'
+```
+
+## Example: Inspect Queued Writebacks
+
+```bash
+curl http://127.0.0.1:8000/writebacks
+```
+
+The reference build queues:
+
+- SIEM enrichment writeback with case summary, severity, status, and evidence count.
+- SOAR investigation package with entities, evidence, and recommended actions.
+
+## Data Model
+
+Core objects:
+
+- `AlertEvent`
+- `EntityRef`
+- `ContextBundle`
+- `Evidence`
+- `AgentDecision`
+- `RecommendedAction`
+- `Case`
+- `Approval`
+- `Feedback`
+- `IntegrationWriteback`
+- `AuditRecord`
+- `MetricsSnapshot`
+
+## Agent Workflow
+
+When `/events` receives an alert:
+
+1. The event is saved into the data fabric adapter.
+2. The event router writes an audit record.
+3. Triage, Threat Intelligence, and Correlation agents run.
+4. High-risk or suspicious outputs trigger Investigation and Response Recommendation agents.
+5. The policy engine applies approval requirements based on action risk.
+6. A case is created with evidence and agent decisions.
+7. Approval requests are created for risky actions.
+8. SIEM writeback is queued.
+9. SOAR package is queued when approvals exist.
+10. Metrics and audit records are available through API endpoints.
+
+## Action Risk Levels
+
+| Level | Name | Default Behavior |
+| --- | --- | --- |
+| 0 | Read-only | No approval |
+| 1 | Case write | No approval |
+| 2 | Enrichment | No approval |
+| 3 | Reversible response | Approval required |
+| 4 | High-impact containment | Approval required |
+| 5 | Destructive | Approval required |
+
+Configure the approval threshold:
+
+```bash
+export REQUIRE_HUMAN_APPROVAL_LEVEL=3
+```
+
+## Repository Layout
+
+```text
+agentic_soc/
+  main.py              Runnable reference service
+docs/
+  PRD.md              Product requirements
+  ARCHITECTURE.md     Architecture and production hardening notes
+tests/
+  test_api.py
+  test_orchestrator.py
+Dockerfile
+docker-compose.yml
+pyproject.toml
+```
+
+## Production Hardening Checklist
+
+- Replace in-memory stores with durable persistence.
+- Add authentication and authorization to every route.
+- Add per-agent data access scopes.
+- Add field-level masking for sensitive data.
+- Add real SIEM and SOAR clients behind the writeback queue.
+- Add EDR, IAM, cloud, CMDB, vulnerability, and threat intel adapters.
+- Add an event bus for asynchronous workflow execution.
+- Add retry, dead-letter, idempotency, and workflow resume support.
+- Add model gateway and prompt/version registry if LLM-backed agents are introduced.
+- Add prompt-injection handling for log-derived text.
+- Add OpenTelemetry traces and structured logs.
+- Add dashboarding on MTTA, false positives, override rate, and escalation accuracy.
+
+## Docs
+
+- [Production PRD](docs/PRD.md)
+- [Architecture](docs/ARCHITECTURE.md)
