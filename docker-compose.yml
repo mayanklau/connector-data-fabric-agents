@@ -1,0 +1,8 @@
+services:
+  agentic-soc:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: local
+      REQUIRE_HUMAN_APPROVAL_LEVEL: "3"
