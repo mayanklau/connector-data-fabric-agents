@@ -12,6 +12,7 @@ from agentic_soc.main import (
     app,
     get_agent_runtime,
     get_repo,
+    get_settings,
     get_store,
     reset_state_for_tests,
 )
@@ -52,6 +53,10 @@ def registration_payload(**overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_suite_uses_isolated_database() -> None:
+    assert "agentic-soc-tests-" in get_settings().database_url
 
 
 def test_agent_registration_discovery_routing_and_owned_callback() -> None:
