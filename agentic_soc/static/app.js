@@ -23,6 +23,8 @@ const empty = (message) => `<div class="empty">${message}</div>`;
 const shortId = (value) => value ? `${value.slice(0, 11)}…` : "—";
 
 function render() {
+  $("#authPanel").hidden = Boolean(state.key);
+  $("#workspace").hidden = !state.key;
   const { dashboard, cases, approvals, workflows, connectors, writebacks, scenarios } = state.data;
   const metrics = [
     ["Cases created", dashboard.metrics.cases_created, "durable"],
