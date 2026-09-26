@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package agentic.soc.v1;
+
+// JSON payloads preserve the same canonical schema across HTTP, gRPC, and MCP.
+service AgentService {
+  rpc Execute (JsonEnvelope) returns (JsonEnvelope);
+}
+
+message JsonEnvelope {
+  bytes json = 1;
+}

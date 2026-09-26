@@ -18,11 +18,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     ports:
       - "8000:8000"
     environment:
       APP_ENV: demo
       DATABASE_URL: postgresql+psycopg://agentic_soc:agentic_soc@postgres:5432/agentic_soc
+      BROKER_URL: redis://redis:6379/0
+      PUBLIC_BASE_URL: http://agentic-soc:8000
       REQUIRE_HUMAN_APPROVAL_LEVEL: "3"
       ADMIN_API_KEY: ${ADMIN_API_KEY:-demo-admin-key}
       ANALYST_API_KEY: ${ANALYST_API_KEY:-demo-analyst-key}
@@ -31,6 +37,56 @@ services:
       SIEM_API_TOKEN: ${SIEM_API_TOKEN:-}
       SOAR_WEBHOOK_URL: ${SOAR_WEBHOOK_URL:-}
       SOAR_API_TOKEN: ${SOAR_API_TOKEN:-}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-stub}
+      MODEL_BASE_URL: ${MODEL_BASE_URL:-}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+
+  worker:
+    build: .
+    command: ["python", "-m", "agentic_soc.worker"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      APP_ENV: demo
+      DATABASE_URL: postgresql+psycopg://agentic_soc:agentic_soc@postgres:5432/agentic_soc
+      BROKER_URL: redis://redis:6379/0
+      PUBLIC_BASE_URL: http://agentic-soc:8000
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-demo-admin-key}
+      AGENT_API_KEY: ${AGENT_API_KEY:-demo-agent-key}
+
+  migrate:
+    build: .
+    command: ["python", "-m", "agentic_soc.migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://agentic_soc:agentic_soc@postgres:5432/agentic_soc
+
+  reference-agent:
+    build: .
+    command: ["uvicorn", "agentic_soc.reference_agent:app", "--host", "0.0.0.0", "--port", "8100"]
+    environment:
+      REFERENCE_AGENT_SECRET: ${REFERENCE_AGENT_SECRET:-reference-agent-secret}
+    ports:
+      - "8100:8100"
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - agentic-soc-redis:/data
 
 volumes:
   agentic-soc-postgres:
+  agentic-soc-redis:

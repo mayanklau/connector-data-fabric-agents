@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentic-soc.example/schemas/agent-protocol-1.0.schema.json",
+  "title": "Agentic SOC Agent Protocol 1.0",
+  "oneOf": [
+    {"$ref": "#/$defs/executionRequest"},
+    {"$ref": "#/$defs/executionResult"}
+  ],
+  "$defs": {
+    "executionRequest": {
+      "type": "object",
+      "required": ["protocol_version", "invocation_id", "capability", "event"],
+      "properties": {
+        "protocol_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+        "invocation_id": {"type": "string", "pattern": "^inv_"},
+        "workflow_id": {"type": ["string", "null"]},
+        "capability": {"enum": ["triage", "investigation", "threat_intel", "correlation", "response_recommendation"]},
+        "event": {"type": "object"},
+        "context": {"type": "object"},
+        "callback_url": {"type": ["string", "null"], "format": "uri"},
+        "deadline": {"type": ["string", "null"], "format": "date-time"},
+        "trace_context": {"type": "object", "additionalProperties": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "executionResult": {
+      "type": "object",
+      "required": ["protocol_version", "invocation_id", "status", "decisions"],
+      "properties": {
+        "protocol_version": {"type": "string", "pattern": "^1\\.[0-9]+$"},
+        "invocation_id": {"type": "string"},
+        "status": {"enum": ["accepted", "completed", "failed"]},
+        "decisions": {"type": "array", "items": {"$ref": "#/$defs/decision"}},
+        "error": {"type": ["string", "null"]},
+        "metrics": {"type": "object", "additionalProperties": {"type": "number"}}
+      },
+      "additionalProperties": false
+    },
+    "decision": {
+      "type": "object",
+      "required": ["agent_type", "disposition", "severity", "confidence", "summary"],
+      "properties": {
+        "agent_type": {"enum": ["triage", "investigation", "threat_intel", "correlation", "response_recommendation"]},
+        "disposition": {"enum": ["benign", "suspicious", "malicious", "needs_investigation"]},
+        "severity": {"enum": ["low", "medium", "high", "critical"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "summary": {"type": "string"},
+        "rationale": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": "array", "items": {"type": "object"}},
+        "recommended_actions": {"type": "array", "items": {"type": "object"}},
+        "requires_human_review": {"type": "boolean"},
+        "prompt_version": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]}
+      },
+      "additionalProperties": true
+    }
+  }
+}

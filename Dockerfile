@@ -3,6 +3,9 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY agentic_soc ./agentic_soc
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
+COPY schemas ./schemas
 RUN pip install --no-cache-dir .
 
 EXPOSE 8000

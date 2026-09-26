@@ -1,0 +1,165 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentic-soc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentic-soc-config
+  namespace: agentic-soc
+data:
+  APP_ENV: production
+  PUBLIC_BASE_URL: https://agentic-soc.example.com
+  EXTERNAL_AGENTS_ENABLED: "true"
+  SECRETS_DIR: /run/secrets
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control-plane
+  namespace: agentic-soc
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: control-plane}
+  template:
+    metadata:
+      labels: {app: control-plane}
+    spec:
+      serviceAccountName: agentic-soc
+      containers:
+        - name: api
+          image: ghcr.io/example/agentic-soc:latest
+          ports: [{containerPort: 8000}]
+          envFrom:
+            - configMapRef: {name: agentic-soc-config}
+            - secretRef: {name: agentic-soc-secrets}
+          readinessProbe:
+            httpGet: {path: /ready, port: 8000}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /ready, port: 8000}
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          volumeMounts:
+            - {name: workload-secrets, mountPath: /run/secrets, readOnly: true}
+      volumes:
+        - name: workload-secrets
+          projected:
+            sources:
+              - secret: {name: agentic-soc-mtls}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: agentic-soc
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: worker}
+  template:
+    metadata:
+      labels: {app: worker}
+    spec:
+      serviceAccountName: agentic-soc
+      containers:
+        - name: worker
+          image: ghcr.io/example/agentic-soc:latest
+          command: ["python", "-m", "agentic_soc.worker"]
+          envFrom:
+            - configMapRef: {name: agentic-soc-config}
+            - secretRef: {name: agentic-soc-secrets}
+          resources:
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "2", memory: 1Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: control-plane
+  namespace: agentic-soc
+spec:
+  selector: {app: control-plane}
+  ports: [{port: 80, targetPort: 8000}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: control-plane
+  namespace: agentic-soc
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: control-plane}
+  minReplicas: 3
+  maxReplicas: 12
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 65}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: control-plane
+  namespace: agentic-soc
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: control-plane}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: agentic-soc
+  namespace: agentic-soc
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: agentic-soc
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: agentic-soc
+spec:
+  schedule: "15 2 * * *"
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              command: ["/bin/sh", "-c"]
+              args:
+                - pg_dump "$DATABASE_URL" --format=custom --file="/backup/agentic-soc-$(date +%Y%m%d-%H%M%S).dump"; find /backup -type f -mtime +14 -delete
+              envFrom:
+                - secretRef: {name: agentic-soc-secrets}
+              volumeMounts:
+                - {name: backup, mountPath: /backup}
+          volumes:
+            - name: backup
+              persistentVolumeClaim: {claimName: agentic-soc-backups}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agentic-soc-backups
+  namespace: agentic-soc
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: {storage: 100Gi}
