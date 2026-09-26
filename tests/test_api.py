@@ -117,3 +117,42 @@ def test_async_workflow_idempotency_masking_dashboard_and_model_gateway() -> Non
         json={"prompt_name": "triage_summary", "variables": {"alert_name": "Impossible Travel"}},
     ).json()
     assert model["prompt_version"] == "1.0.0"
+
+
+def test_operator_console_harness_context_ingest_and_writeback_dispatch() -> None:
+    client = TestClient(app)
+    console = client.get("/")
+    assert console.status_code == 200
+    assert "Sentinel Fabric Console" in console.text
+    assert client.get("/ready").json()["database"] == "connected"
+
+    scenarios = client.get("/harness/scenarios", headers=ADMIN_HEADERS).json()
+    assert {scenario["id"] for scenario in scenarios} >= {
+        "identity-takeover",
+        "endpoint-persistence",
+        "prompt-injection",
+    }
+
+    run = client.post(
+        "/harness/scenarios/identity-takeover/run", headers=ADMIN_HEADERS
+    )
+    assert run.status_code == 200
+    assert run.json()["case"]["severity"] == "high"
+
+    context = {
+        "entity": {"type": "host", "id": "host:production-01"},
+        "risk_score": 91,
+        "summary": "Production host with live EDR telemetry.",
+        "source_context": {"edr": {"sensor": "connected"}},
+    }
+    assert client.put("/context/entity", headers=ADMIN_HEADERS, json=context).status_code == 200
+    stored = client.post(
+        "/context/entity",
+        headers=ADMIN_HEADERS,
+        json={"type": "host", "id": "host:production-01"},
+    ).json()
+    assert stored["risk_score"] == 91
+
+    delivered = client.post("/writebacks/dispatch", headers=ADMIN_HEADERS).json()
+    assert delivered
+    assert {item["status"] for item in delivered} == {"harness_delivered"}

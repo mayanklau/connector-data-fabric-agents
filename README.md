@@ -1,6 +1,21 @@
 # Agentic SOC Data Fabric Orchestrator
 
-Reference implementation for an Agentic SOC orchestration layer that lets agents work directly against a governed Security Data Fabric. SIEM remains supported as a signal source and writeback target, but it is no longer the mandatory orchestration layer.
+Runnable integration harness for an Agentic SOC orchestration layer that lets agents work directly against a governed Security Data Fabric. The default demo runs a FastAPI control plane and operator console against PostgreSQL. SIEM and SOAR remain signal and delivery systems instead of the mandatory orchestration hop.
+
+## Demo In Two Commands
+
+```bash
+docker compose up --build -d
+open http://127.0.0.1:8000
+```
+
+Sign in to the console with `demo-admin-key`, run any live scenario, approve an action, and dispatch the SIEM/SOAR writeback queue. PostgreSQL data survives container restarts in the `agentic-soc-postgres` volume.
+
+To stop the harness without deleting its database:
+
+```bash
+docker compose down
+```
 
 ## Target Flow
 
@@ -28,7 +43,8 @@ Cases | Evidence | Approvals | SIEM Writeback | SOAR Package | Audit | Metrics
 
 ## What Is Coded
 
-- Durable SQLite persistence for events, cases, approvals, feedback, audit records, writebacks, workflow runs, prompt templates, and telemetry spans.
+- PostgreSQL persistence in Docker, with SQLite retained only as a zero-dependency local/test option.
+- A responsive operator console for scenarios, alert ingestion, cases, approvals, workflows, integrations, and writeback delivery.
 - API-key authentication and authorization on every route.
 - Per-agent data access scopes enforced by the policy engine.
 - Field-level masking for sensitive user and identity context.
@@ -37,8 +53,7 @@ Cases | Evidence | Approvals | SIEM Writeback | SOAR Package | Audit | Metrics
 - Security Context API for entity context and timeline retrieval.
 - Durable event bus with idempotency keys, async background processing, retry state, dead-letter status, and workflow resume.
 - Triage, Investigation, Threat Intelligence, Correlation, and Response Recommendation agents.
-- SIEM writeback client boundary behind a writeback queue.
-- SOAR investigation package client boundary behind a writeback queue.
+- Configurable HTTP SIEM and SOAR clients behind a durable writeback queue.
 - Prompt-injection sanitization for log-derived text.
 - Model gateway and prompt registry for future LLM-backed agents.
 - OpenTelemetry instrumentation, local telemetry spans, and structured JSON request/audit logs.
@@ -47,17 +62,17 @@ Cases | Evidence | Approvals | SIEM Writeback | SOAR Package | Audit | Metrics
 - Unit tests.
 - Production PRD and architecture docs.
 
-## Local API Keys
+## Demo API Keys
 
 ```text
-admin:   dev-admin-key
-analyst: dev-analyst-key
-agent:   dev-agent-key
+admin:   demo-admin-key
+analyst: demo-analyst-key
+agent:   demo-agent-key
 ```
 
 Every route requires `X-API-Key`. User and identity context is masked unless the caller has `sensitive:read`.
 
-## Quick Start
+## Local Development
 
 ```bash
 python3 -m venv .venv
@@ -72,6 +87,26 @@ Open:
 ```text
 http://127.0.0.1:8000/docs
 ```
+
+The non-Docker development defaults are `dev-admin-key`, `dev-analyst-key`, and `dev-agent-key`, and the database defaults to `sqlite:///agentic_soc.sqlite3`.
+
+## Connect Real SIEM And SOAR Endpoints
+
+Copy the environment template and configure one or both delivery targets:
+
+```bash
+cp .env.example .env
+docker compose up --build -d
+```
+
+```text
+SIEM_WEBHOOK_URL=https://siem.example/api/agentic-soc/writeback
+SIEM_API_TOKEN=replace-me
+SOAR_WEBHOOK_URL=https://soar.example/api/investigations
+SOAR_API_TOKEN=replace-me
+```
+
+`POST /writebacks/dispatch` sends queued payloads over HTTP with a bearer token. Successful responses are marked `delivered`; failures move through `retry` to `dead_lettered`. With no URL configured, the demo uses a local harness sink and marks delivery `harness_delivered` so the complete workflow remains demonstrable offline.
 
 Run checks:
 
@@ -91,11 +126,13 @@ docker compose up --build
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Authenticated health check |
+| `GET` | `/ready` | Container/database readiness probe |
 | `POST` | `/events` | Enqueue durable async workflow |
 | `POST` | `/events/sync` | Run workflow immediately |
 | `GET` | `/workflows` | List workflow runs |
 | `POST` | `/workflows/{workflow_id}/resume` | Resume queued, failed, or dead-lettered workflow |
 | `POST` | `/context/entity` | Get governed entity context with field masking |
+| `PUT` | `/context/entity` | Ingest or update live entity context |
 | `POST` | `/timeline` | Get entity timeline evidence |
 | `GET` | `/cases` | List generated cases |
 | `GET` | `/cases/{case_id}` | Get one case |
@@ -105,6 +142,9 @@ docker compose up --build
 | `GET` | `/audit` | List audit records |
 | `GET` | `/connectors` | Show configured connector modes |
 | `GET` | `/writebacks` | Show queued SIEM/SOAR writebacks |
+| `POST` | `/writebacks/dispatch` | Deliver pending SIEM/SOAR payloads |
+| `GET` | `/harness/scenarios` | List runnable SOC demo scenarios |
+| `POST` | `/harness/scenarios/{id}/run` | Execute and persist a scenario |
 | `GET` | `/metrics` | Show operational metrics |
 | `GET` | `/dashboard` | Show SOC dashboard metrics |
 | `GET` | `/telemetry/spans` | Show local telemetry spans |
@@ -181,9 +221,9 @@ The analyst key can read context, but sensitive user identity and business conte
 
 | Reference Piece | Production Replacement |
 | --- | --- |
-| SQLite repository | Managed PostgreSQL, cloud SQL, or enterprise case store |
-| Stub SIEM client | Splunk, Sentinel, QRadar, Chronicle, Elastic, or internal SIEM API |
-| Stub SOAR client | Cortex XSOAR, Splunk SOAR, Tines, Torq, ServiceNow SecOps, or internal SOAR |
+| Docker PostgreSQL | Managed PostgreSQL or enterprise case store |
+| Generic SIEM HTTP client | Vendor-specific Splunk, Sentinel, QRadar, Chronicle, Elastic, or internal client |
+| Generic SOAR HTTP client | Cortex XSOAR, Splunk SOAR, Tines, Torq, ServiceNow SecOps, or internal client |
 | Stub EDR/IAM/cloud/CMDB/vuln/TI adapters | Real enterprise connector clients |
 | API-key auth | Enterprise IdP, OAuth2, mTLS, or workload identity |
 | Simple policy threshold | RBAC/ABAC policy service with per-action approval rules |
@@ -194,7 +234,7 @@ The analyst key can read context, but sensitive user identity and business conte
 
 1. The request is authenticated and authorized.
 2. Prompt-injection patterns in event text are sanitized.
-3. The event is durably saved into SQLite.
+3. The event is durably saved into PostgreSQL in the demo stack.
 4. The workflow is enqueued with an idempotency key.
 5. The event router writes an audit record.
 6. Triage, Threat Intelligence, and Correlation agents run with policy-scoped access.

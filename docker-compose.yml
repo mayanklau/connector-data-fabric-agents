@@ -1,8 +1,36 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentic_soc
+      POSTGRES_USER: agentic_soc
+      POSTGRES_PASSWORD: agentic_soc
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentic_soc -d agentic_soc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - agentic-soc-postgres:/var/lib/postgresql/data
+
   agentic-soc:
     build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8000:8000"
     environment:
-      APP_ENV: local
+      APP_ENV: demo
+      DATABASE_URL: postgresql+psycopg://agentic_soc:agentic_soc@postgres:5432/agentic_soc
       REQUIRE_HUMAN_APPROVAL_LEVEL: "3"
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-demo-admin-key}
+      ANALYST_API_KEY: ${ANALYST_API_KEY:-demo-analyst-key}
+      AGENT_API_KEY: ${AGENT_API_KEY:-demo-agent-key}
+      SIEM_WEBHOOK_URL: ${SIEM_WEBHOOK_URL:-}
+      SIEM_API_TOKEN: ${SIEM_API_TOKEN:-}
+      SOAR_WEBHOOK_URL: ${SOAR_WEBHOOK_URL:-}
+      SOAR_API_TOKEN: ${SOAR_API_TOKEN:-}
+
+volumes:
+  agentic-soc-postgres:

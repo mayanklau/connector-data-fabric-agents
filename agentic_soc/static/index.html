@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinel Fabric Console</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="mark">SF</span><div><strong>Sentinel Fabric</strong><small>Agentic SOC</small></div></div>
+      <nav>
+        <button class="nav-item active" data-view="overview">Overview</button>
+        <button class="nav-item" data-view="cases">Cases</button>
+        <button class="nav-item" data-view="workflows">Workflows</button>
+        <button class="nav-item" data-view="integrations">Integrations</button>
+      </nav>
+      <div class="sidebar-status"><span class="status-dot"></span><div><strong>Control plane</strong><small id="runtimeStatus">Connecting</small></div></div>
+    </aside>
+
+    <main>
+      <header>
+        <div><p class="eyebrow">Security operations</p><h1 id="pageTitle">Operations overview</h1></div>
+        <div class="header-actions">
+          <span class="last-sync" id="lastSync">Not synced</span>
+          <button class="button secondary" id="refreshButton">Refresh</button>
+          <button class="button primary" id="newAlertButton">Ingest alert</button>
+        </div>
+      </header>
+
+      <section id="authPanel" class="auth-panel">
+        <div><strong>Connect to the control plane</strong><p>Use the admin key configured for this environment.</p></div>
+        <form id="authForm"><input id="apiKey" type="password" value="demo-admin-key" aria-label="API key"><button class="button primary">Connect</button></form>
+      </section>
+
+      <div id="workspace" hidden>
+        <section class="metrics" id="metrics"></section>
+
+        <section class="view active" id="overviewView">
+          <div class="section-head"><div><p class="eyebrow">Live harness</p><h2>Run a detection scenario</h2></div><p>Each run writes events, decisions, cases, approvals, audit records, and writebacks to the configured database.</p></div>
+          <div class="scenario-grid" id="scenarios"></div>
+          <div class="two-column">
+            <section class="panel"><div class="panel-head"><h2>Recent cases</h2><button class="link-button" data-go="cases">View all</button></div><div id="recentCases"></div></section>
+            <section class="panel"><div class="panel-head"><h2>Pending approvals</h2><span class="count" id="approvalCount">0</span></div><div id="approvals"></div></section>
+          </div>
+        </section>
+
+        <section class="view" id="casesView"><section class="panel wide"><div class="panel-head"><h2>Case register</h2><span class="muted">Durable records</span></div><div id="caseTable"></div></section></section>
+        <section class="view" id="workflowsView"><section class="panel wide"><div class="panel-head"><h2>Workflow execution</h2><span class="muted">Retry and resume state</span></div><div id="workflowTable"></div></section></section>
+        <section class="view" id="integrationsView">
+          <div class="section-head"><div><p class="eyebrow">Delivery plane</p><h2>Connectors and writebacks</h2></div><button class="button primary" id="dispatchButton">Dispatch queued</button></div>
+          <div class="connector-grid" id="connectors"></div>
+          <section class="panel wide"><div class="panel-head"><h2>Writeback queue</h2><span class="muted">SIEM and SOAR delivery</span></div><div id="writebackTable"></div></section>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="alertDialog">
+    <form id="alertForm" method="dialog">
+      <div class="dialog-head"><div><p class="eyebrow">Manual ingestion</p><h2>Submit security alert</h2></div><button type="button" class="close-button" id="closeDialog" aria-label="Close">×</button></div>
+      <label>Alert name<input name="name" required value="Unusual privileged login"></label>
+      <div class="form-row"><label>Source<select name="source"><option>iam</option><option>edr</option><option>cloud</option><option>siem</option></select></label><label>Severity<select name="severity"><option>medium</option><option>high</option><option>critical</option><option>low</option></select></label></div>
+      <div class="form-row"><label>Entity type<select name="entityType"><option>user</option><option>host</option><option>ip</option><option>cloud_resource</option></select></label><label>Entity ID<input name="entityId" required value="user:maya"></label></div>
+      <label>Description<textarea name="description" rows="3">Privileged login observed from a new network.</textarea></label>
+      <div class="dialog-actions"><button type="button" class="button secondary" id="cancelDialog">Cancel</button><button class="button primary" value="submit">Analyze alert</button></div>
+    </form>
+  </dialog>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
