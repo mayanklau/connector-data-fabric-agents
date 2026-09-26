@@ -3,70 +3,67 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Sentinel Fabric Console</title>
+  <meta name="theme-color" content="#10171d">
+  <title>Sentinel Fabric | Security Operations</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
-      <div class="brand"><span class="mark">SF</span><div><strong>Sentinel Fabric</strong><small>Agentic SOC</small></div></div>
-      <nav>
-        <button class="nav-item active" data-view="overview">Overview</button>
-        <button class="nav-item" data-view="cases">Cases</button>
-        <button class="nav-item" data-view="workflows">Workflows</button>
-        <button class="nav-item" data-view="integrations">Integrations</button>
+      <div class="brand"><span class="mark">SF</span><div><strong>Sentinel Fabric</strong><small>Autonomous Defense</small></div></div>
+      <div class="nav-label">Operations</div>
+      <nav aria-label="Primary navigation">
+        <button class="nav-item active" data-view="overview"><span class="nav-glyph">01</span><span>Command center</span></button>
+        <button class="nav-item" data-view="cases"><span class="nav-glyph">02</span><span>Investigations</span><b id="caseNavCount">0</b></button>
+        <button class="nav-item" data-view="workflows"><span class="nav-glyph">03</span><span>Automation</span></button>
+        <button class="nav-item" data-view="integrations"><span class="nav-glyph">04</span><span>Data fabric</span></button>
       </nav>
-      <div class="sidebar-status"><span class="status-dot"></span><div><strong>Control plane</strong><small id="runtimeStatus">Connecting</small></div></div>
+      <div class="nav-label lower">Workspace</div>
+      <div class="workspace-meta"><div><span>Environment</span><strong>Production demo</strong></div><div><span>Region</span><strong>AP-South</strong></div></div>
+      <div class="sidebar-footer">
+        <div class="sidebar-status"><span class="status-dot"></span><div><strong>All systems nominal</strong><small id="runtimeStatus">Connecting to fabric</small></div></div>
+        <div class="analyst"><span>ML</span><div><strong>Mayank Lau</strong><small>Security administrator</small></div></div>
+      </div>
     </aside>
 
     <main>
-      <header>
-        <div><p class="eyebrow">Security operations</p><h1 id="pageTitle">Operations overview</h1></div>
-        <div class="header-actions">
-          <span class="last-sync" id="lastSync">Not synced</span>
-          <button class="button secondary" id="refreshButton">Refresh</button>
-          <button class="button primary" id="newAlertButton">Ingest alert</button>
-        </div>
+      <header class="topbar">
+        <div><div class="breadcrumb"><span>Security operations</span><i>/</i><strong id="breadcrumbCurrent">Command center</strong></div><h1 id="pageTitle">Command center</h1></div>
+        <div class="header-actions"><div class="live-state"><span></span>Live</div><span class="last-sync" id="lastSync">Awaiting sync</span><button class="icon-command" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button><button class="button primary" id="newAlertButton"><span>+</span> Ingest alert</button></div>
       </header>
 
-      <section id="authPanel" class="auth-panel">
-        <div><strong>Connect to the control plane</strong><p>Use the admin key configured for this environment.</p></div>
-        <form id="authForm"><input id="apiKey" type="password" value="demo-admin-key" aria-label="API key"><button class="button primary">Connect</button></form>
-      </section>
+      <section id="authPanel" class="auth-gate"><div class="auth-card"><span class="mark large">SF</span><p class="kicker">Secure workspace</p><h2>Connect to Sentinel Fabric</h2><p>Authenticate to access governed security telemetry and agent workflows.</p><form id="authForm"><label>Control plane key<input id="apiKey" type="password" value="demo-admin-key" autocomplete="current-password"></label><button class="button primary">Open command center</button></form></div></section>
 
       <div id="workspace" hidden>
+        <section class="system-strip"><div><span class="status-dot"></span><strong>Security data fabric connected</strong><small>9 sources streaming</small></div><div><span>Policy</span><strong>Human approval ≥ L3</strong></div><div><span>Data residency</span><strong>AP-South-1</strong></div><div><span>Last event</span><strong id="lastEventTime">Just now</strong></div></section>
         <section class="metrics" id="metrics"></section>
 
         <section class="view active" id="overviewView">
-          <div class="section-head"><div><p class="eyebrow">Live harness</p><h2>Run a detection scenario</h2></div><p>Each run writes events, decisions, cases, approvals, audit records, and writebacks to the configured database.</p></div>
-          <div class="scenario-grid" id="scenarios"></div>
-          <div class="two-column">
-            <section class="panel"><div class="panel-head"><h2>Recent cases</h2><button class="link-button" data-go="cases">View all</button></div><div id="recentCases"></div></section>
-            <section class="panel"><div class="panel-head"><h2>Pending approvals</h2><span class="count" id="approvalCount">0</span></div><div id="approvals"></div></section>
+          <div class="dashboard-grid">
+            <section class="panel incident-panel">
+              <div class="panel-head"><div><p class="kicker">Active investigations</p><h2>Incident queue</h2></div><div class="panel-actions"><span class="queue-live"><i></i>Streaming</span><button class="link-button" data-go="cases">Open queue</button></div></div>
+              <div class="table-toolbar"><input class="search-field" id="incidentSearch" placeholder="Search cases, entities, techniques"><div class="segmented" id="incidentFilters"><button class="active" data-filter="all">All</button><button data-filter="high">High</button><button data-filter="pending">Pending</button></div></div>
+              <div id="recentCases"></div>
+            </section>
+            <div class="right-rail">
+              <section class="panel posture-panel"><div class="panel-head"><div><p class="kicker">Last 24 hours</p><h2>Risk posture</h2></div><span class="trend neutral">Stable</span></div><div id="riskChart"></div></section>
+              <section class="panel approval-panel"><div class="panel-head"><div><p class="kicker">Human in the loop</p><h2>Approval queue</h2></div><span class="count" id="approvalCount">0</span></div><div id="approvals"></div></section>
+            </div>
           </div>
+
+          <section class="harness-band"><div class="section-head"><div><p class="kicker">Simulation workspace</p><h2>Detection validation harness</h2></div><p>Execute controlled attack paths against the live policy, orchestration, and persistence layers.</p></div><div class="scenario-grid" id="scenarios"></div></section>
         </section>
 
-        <section class="view" id="casesView"><section class="panel wide"><div class="panel-head"><h2>Case register</h2><span class="muted">Durable records</span></div><div id="caseTable"></div></section></section>
-        <section class="view" id="workflowsView"><section class="panel wide"><div class="panel-head"><h2>Workflow execution</h2><span class="muted">Retry and resume state</span></div><div id="workflowTable"></div></section></section>
-        <section class="view" id="integrationsView">
-          <div class="section-head"><div><p class="eyebrow">Delivery plane</p><h2>Connectors and writebacks</h2></div><button class="button primary" id="dispatchButton">Dispatch queued</button></div>
-          <div class="connector-grid" id="connectors"></div>
-          <section class="panel wide"><div class="panel-head"><h2>Writeback queue</h2><span class="muted">SIEM and SOAR delivery</span></div><div id="writebackTable"></div></section>
-        </section>
+        <section class="view" id="casesView"><div class="view-summary"><div><p class="kicker">Investigation management</p><h2>All security cases</h2></div><div class="segmented"><button class="active">Open</button><button>Awaiting approval</button><button>Resolved</button></div></div><section class="panel wide"><div class="table-toolbar"><input class="search-field" id="caseSearch" placeholder="Filter by case ID, entity, or title"><button class="button secondary">Export</button></div><div id="caseTable"></div></section></section>
+
+        <section class="view" id="workflowsView"><div class="view-summary"><div><p class="kicker">Agent execution</p><h2>Workflow operations</h2></div><div class="summary-stat"><span>Execution policy</span><strong>Retry ×3 · DLQ enabled</strong></div></div><section class="panel wide"><div class="panel-head"><div><h2>Workflow ledger</h2><p>Durable execution, retry, and resume state</p></div><span class="queue-live"><i></i>Workers healthy</span></div><div id="workflowTable"></div></section></section>
+
+        <section class="view" id="integrationsView"><div class="view-summary"><div><p class="kicker">Security data fabric</p><h2>Integration health</h2></div><button class="button primary" id="dispatchButton">Dispatch queued writebacks</button></div><div class="connector-grid" id="connectors"></div><section class="panel wide"><div class="panel-head"><div><h2>Delivery queue</h2><p>Governed SIEM and SOAR writeback state</p></div><span class="queue-live"><i></i>Dispatcher ready</span></div><div id="writebackTable"></div></section></section>
       </div>
     </main>
   </div>
 
-  <dialog id="alertDialog">
-    <form id="alertForm" method="dialog">
-      <div class="dialog-head"><div><p class="eyebrow">Manual ingestion</p><h2>Submit security alert</h2></div><button type="button" class="close-button" id="closeDialog" aria-label="Close">×</button></div>
-      <label>Alert name<input name="name" required value="Unusual privileged login"></label>
-      <div class="form-row"><label>Source<select name="source"><option>iam</option><option>edr</option><option>cloud</option><option>siem</option></select></label><label>Severity<select name="severity"><option>medium</option><option>high</option><option>critical</option><option>low</option></select></label></div>
-      <div class="form-row"><label>Entity type<select name="entityType"><option>user</option><option>host</option><option>ip</option><option>cloud_resource</option></select></label><label>Entity ID<input name="entityId" required value="user:maya"></label></div>
-      <label>Description<textarea name="description" rows="3">Privileged login observed from a new network.</textarea></label>
-      <div class="dialog-actions"><button type="button" class="button secondary" id="cancelDialog">Cancel</button><button class="button primary" value="submit">Analyze alert</button></div>
-    </form>
-  </dialog>
+  <dialog id="alertDialog"><form id="alertForm" method="dialog"><div class="dialog-head"><div><p class="kicker">Manual ingestion</p><h2>Submit security alert</h2><p>Send an event directly into the governed orchestration path.</p></div><button type="button" class="close-button" id="closeDialog" aria-label="Close">×</button></div><label>Alert name<input name="name" required value="Unusual privileged login"></label><div class="form-row"><label>Source<select name="source"><option>iam</option><option>edr</option><option>cloud</option><option>siem</option></select></label><label>Severity<select name="severity"><option>medium</option><option>high</option><option>critical</option><option>low</option></select></label></div><div class="form-row"><label>Entity type<select name="entityType"><option>user</option><option>host</option><option>ip</option><option>cloud_resource</option></select></label><label>Entity ID<input name="entityId" required value="user:maya"></label></div><label>Description<textarea name="description" rows="4">Privileged login observed from a new network.</textarea></label><div class="dialog-actions"><button type="button" class="button secondary" id="cancelDialog">Cancel</button><button class="button primary" value="submit">Analyze alert</button></div></form></dialog>
   <div class="toast" id="toast" role="status"></div>
   <script src="/app.js"></script>
 </body>

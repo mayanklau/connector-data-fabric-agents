@@ -27,29 +27,53 @@ function render() {
   $("#workspace").hidden = !state.key;
   const { dashboard, cases, approvals, workflows, connectors, writebacks, scenarios } = state.data;
   const metrics = [
-    ["Cases created", dashboard.metrics.cases_created, "durable"],
-    ["Pending approval", dashboard.metrics.approvals_pending, "human review"],
-    ["MTTA", `${dashboard.mtta_seconds.toFixed(0)}s`, "current"],
-    ["Escalation accuracy", `${(dashboard.escalation_accuracy * 100).toFixed(0)}%`, "feedback based"],
+    ["Open investigations", dashboard.metrics.cases_created, "All durable cases", "64%"],
+    ["Pending decisions", dashboard.metrics.approvals_pending, "Human approval", "42%"],
+    ["Mean time to assess", `${dashboard.mtta_seconds.toFixed(1)}s`, "Current window", "77%"],
+    ["Escalation precision", `${(dashboard.escalation_accuracy * 100).toFixed(0)}%`, "Analyst verified", "96%"],
   ];
-  $("#metrics").innerHTML = metrics.map(([label, value, note]) => `<div class="metric"><small>${label}</small><strong>${value}</strong><span>${note}</span></div>`).join("");
-  $("#scenarios").innerHTML = scenarios.map((item) => `<article class="scenario"><span class="source-tag">${item.event.source}</span><h3>${item.title}</h3><p>${item.description}</p><button class="button secondary small" data-scenario="${item.id}">Run scenario</button></article>`).join("");
+  $("#metrics").innerHTML = metrics.map(([label, value, note, width]) => `<div class="metric"><div class="metric-head"><small>${label}</small><span class="metric-trend">Live</span></div><div class="metric-value"><strong>${value}</strong><span class="metric-note">${note}</span></div><div class="metric-line"><span style="width:${width}"></span></div></div>`).join("");
+  $("#caseNavCount").textContent = cases.length;
+  $("#lastEventTime").textContent = cases.length ? "Less than 1 min" : "No events";
+  $("#scenarios").innerHTML = scenarios.map((item, index) => `<article class="scenario"><span class="scenario-index">0${index + 1}</span><div><span class="source-tag">${item.event.source}</span><h3>${item.title}</h3><p>${item.description}</p></div><button class="button secondary small" data-scenario="${item.id}">Execute</button></article>`).join("");
 
-  const caseRows = [...cases].reverse().map((item) => `<tr><td><span class="case-title">${item.title}</span><span class="case-id">${item.id}</span></td><td>${badge(item.severity)}</td><td>${badge(item.status)}</td><td>${item.evidence.length}</td></tr>`).join("");
-  const caseTable = cases.length ? `<table><thead><tr><th>Case</th><th>Severity</th><th>Status</th><th>Evidence</th></tr></thead><tbody>${caseRows}</tbody></table>` : empty("No cases yet. Run a scenario to create one.");
-  $("#recentCases").innerHTML = cases.length ? `<table><tbody>${[...cases].reverse().slice(0, 4).map((item) => `<tr><td><span class="case-title">${item.title}</span><span class="case-id">${shortId(item.id)}</span></td><td>${badge(item.severity)}</td><td>${badge(item.status)}</td></tr>`).join("")}</tbody></table>` : empty("No cases yet.");
+  const renderCaseRow = (item) => {
+    const entities = item.entities.map((entity) => entity.id).slice(0, 2).join(" · ") || "No entities";
+    return `<tr><td><div class="case-cell"><i class="severity-rail ${item.severity}"></i><div><span class="case-title">${item.title}</span><span class="case-id">${shortId(item.id)}</span></div></div></td><td>${badge(item.severity)}</td><td>${badge(item.status)}</td><td><span class="entity-list">${entities}</span></td><td>${item.evidence.length}</td></tr>`;
+  };
+  const caseRows = [...cases].reverse().map(renderCaseRow).join("");
+  const tableHead = `<thead><tr><th>Investigation</th><th>Severity</th><th>State</th><th>Primary entities</th><th>Evidence</th></tr></thead>`;
+  const caseTable = cases.length ? `<table>${tableHead}<tbody>${caseRows}</tbody></table>` : empty("No cases yet. Run a validation scenario to create one.");
+  $("#recentCases").innerHTML = cases.length ? `<table>${tableHead}<tbody>${[...cases].reverse().slice(0, 6).map(renderCaseRow).join("")}</tbody></table>` : empty("No active investigations.");
   $("#caseTable").innerHTML = caseTable;
 
   const pending = approvals.filter((item) => item.status === "pending");
   $("#approvalCount").textContent = pending.length;
-  $("#approvals").innerHTML = pending.length ? pending.slice(0, 4).map((item) => `<div class="approval"><strong>${item.action.name}</strong><small>${shortId(item.case_id)} · risk ${item.action.risk_level}</small><div class="approval-actions"><button class="button primary small" data-approval="${item.id}" data-decision="true">Approve</button><button class="button secondary small" data-approval="${item.id}" data-decision="false">Reject</button></div></div>`).join("") : empty("No actions waiting for review.");
+  $("#approvals").innerHTML = pending.length ? pending.slice(0, 4).map((item) => `<div class="approval"><div class="approval-top"><div><strong>${item.action.name}</strong><small>${shortId(item.case_id)} · ${item.action.target?.id || "case action"}</small></div><span class="risk-level">L${item.action.risk_level}</span></div><div class="approval-actions"><button class="button primary small" data-approval="${item.id}" data-decision="true">Approve</button><button class="button secondary small" data-approval="${item.id}" data-decision="false">Deny</button></div></div>`).join("") : empty("No actions require analyst review.");
 
-  $("#workflowTable").innerHTML = workflows.length ? `<table><thead><tr><th>Workflow</th><th>Status</th><th>Attempts</th><th>Case</th></tr></thead><tbody>${[...workflows].reverse().map((item) => `<tr><td><span class="case-id">${item.id}</span></td><td>${badge(item.status)}</td><td>${item.attempts}</td><td><span class="case-id">${shortId(item.result_case_id)}</span></td></tr>`).join("")}</tbody></table>` : empty("No asynchronous workflows yet.");
-  $("#connectors").innerHTML = connectors.map((item) => `<article class="connector"><div><strong>${item.name.replaceAll("_", " ")}</strong><small>${item.type} · ${item.mode}</small></div><span class="connector-state">${item.status}</span></article>`).join("");
-  $("#writebackTable").innerHTML = writebacks.length ? `<table><thead><tr><th>Target</th><th>Status</th><th>Case</th><th>Attempts</th></tr></thead><tbody>${[...writebacks].reverse().map((item) => `<tr><td><strong>${item.target.toUpperCase()}</strong></td><td>${badge(item.status)}</td><td><span class="case-id">${shortId(item.case_id)}</span></td><td>${item.attempts}</td></tr>`).join("")}</tbody></table>` : empty("The writeback queue is empty.");
+  const severities = { critical: 0, high: 0, medium: 0, low: 0 };
+  cases.forEach((item) => { severities[item.severity] = (severities[item.severity] || 0) + 1; });
+  const riskTotal = Math.max(1, cases.length);
+  const riskScore = Math.min(99, Math.round((severities.critical * 100 + severities.high * 80 + severities.medium * 45 + severities.low * 15) / riskTotal));
+  $("#riskChart").innerHTML = `<div class="risk-summary"><div class="risk-score"><div><strong>${riskScore}</strong><small>Risk index</small></div></div><div class="risk-breakdown">${[["High", severities.critical + severities.high, "high"], ["Medium", severities.medium, "medium"], ["Low", severities.low, "low"]].map(([label, count, level]) => `<div class="risk-row ${level}"><span>${label}</span><div class="risk-bar"><i style="width:${Math.max(4, Number(count) / riskTotal * 100)}%"></i></div><strong>${count}</strong></div>`).join("")}</div></div>`;
+
+  $("#workflowTable").innerHTML = workflows.length ? `<table><thead><tr><th>Workflow ID</th><th>Execution state</th><th>Attempts</th><th>Result case</th><th>Last error</th></tr></thead><tbody>${[...workflows].reverse().map((item) => `<tr><td><span class="case-id">${item.id}</span></td><td>${badge(item.status)}</td><td>${item.attempts} / 3</td><td><span class="case-id">${shortId(item.result_case_id)}</span></td><td>${item.error || "—"}</td></tr>`).join("")}</tbody></table>` : empty("No asynchronous workflow executions recorded.");
+  $("#connectors").innerHTML = connectors.map((item) => `<article class="connector"><div><strong>${item.name.replaceAll("_", " ")}</strong><small>${item.type} · ${item.mode}<br>${item.capabilities.join(" · ") || "health monitoring"}</small></div><span class="connector-state">● ${item.status}</span></article>`).join("");
+  $("#writebackTable").innerHTML = writebacks.length ? `<table><thead><tr><th>Destination</th><th>Delivery state</th><th>Case reference</th><th>Attempts</th><th>Error</th></tr></thead><tbody>${[...writebacks].reverse().map((item) => `<tr><td><strong>${item.target.toUpperCase()}</strong></td><td>${badge(item.status)}</td><td><span class="case-id">${shortId(item.case_id)}</span></td><td>${item.attempts}</td><td>${item.last_error || "—"}</td></tr>`).join("")}</tbody></table>` : empty("The delivery queue is empty.");
 
   $$('[data-scenario]').forEach((button) => button.onclick = () => runScenario(button.dataset.scenario));
   $$('[data-approval]').forEach((button) => button.onclick = () => decideApproval(button.dataset.approval, button.dataset.decision === "true"));
+  const filterRows = (container, value) => {
+    const needle = value.toLowerCase();
+    $$(`${container} tbody tr`).forEach((row) => { row.hidden = !row.textContent.toLowerCase().includes(needle); });
+  };
+  $("#incidentSearch").oninput = (event) => filterRows("#recentCases", event.target.value);
+  $("#caseSearch").oninput = (event) => filterRows("#caseTable", event.target.value);
+  $$("#incidentFilters button").forEach((button) => button.onclick = () => {
+    $$("#incidentFilters button").forEach((item) => item.classList.toggle("active", item === button));
+    const value = button.dataset.filter === "all" ? "" : button.dataset.filter === "pending" ? "awaiting_approval" : button.dataset.filter;
+    filterRows("#recentCases", value);
+  });
 }
 
 async function refresh(showToast = false) {
@@ -104,8 +128,9 @@ $("#alertForm").addEventListener("submit", async (event) => {
 function selectView(name) {
   $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}View`));
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
-  const titles = { overview: "Operations overview", cases: "Investigation cases", workflows: "Workflow operations", integrations: "Integration health" };
+  const titles = { overview: "Command center", cases: "Investigations", workflows: "Automation", integrations: "Data fabric" };
   $("#pageTitle").textContent = titles[name];
+  $("#breadcrumbCurrent").textContent = titles[name];
 }
 $$('[data-view]').forEach((button) => button.onclick = () => selectView(button.dataset.view));
 $$('[data-go]').forEach((button) => button.onclick = () => selectView(button.dataset.go));

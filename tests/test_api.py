@@ -123,7 +123,7 @@ def test_operator_console_harness_context_ingest_and_writeback_dispatch() -> Non
     client = TestClient(app)
     console = client.get("/")
     assert console.status_code == 200
-    assert "Sentinel Fabric Console" in console.text
+    assert "Sentinel Fabric" in console.text
     assert client.get("/ready").json()["database"] == "connected"
 
     scenarios = client.get("/harness/scenarios", headers=ADMIN_HEADERS).json()
